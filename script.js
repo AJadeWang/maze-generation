@@ -33,16 +33,36 @@ document.addEventListener('DOMContentLoaded', () => {
 	
 	// --- Game World & Map Data ---
 	// Simple 0/1 Grid Maze (1 = Wall, 0 = Empty)
-	const TILE_SIZE = 40;
-	const ROW = 10
+	const TILE_SIZE = 50;
+	const ROW = 10 *2+1;
 	const COLUMN = 15;
 	const map = {
-		tiles:Array({length:5}, () => Array({length:COLUMN}).fill(1)),
-		walls:Array({length:5}, () => Array({length:COLUMN}).fill(1)),
+		tiles:Array.from({length:ROW}, () => Array({length:COLUMN}).fill(true)),
+		walls:[],
+		
+		//cordinate manipulation functions
+		tile2wall(x1,y1,x2,y2) {
+		},
 		breakWall(x, y, direction) {
 			
 		},
+		
+		init() {
+			for (let r=0; r < ROW; r++) {
+				const row = [];
+				for (let c=0; c < COLUMN+r%2; c++) {
+					row.push(true);
+				}
+				this.walls.push(row);
+			}
+		}
 	};
+	map.init();
+	console.log("map data");
+	console.log(map.walls.length);
+	console.log(map.walls[0].length);
+	console.log(map.walls.length);
+	console.log(map.walls[0].length);
 	
 	// Check collision between a point/circle and wall tiles
 	function isWall(x, y, radius = 0) {
@@ -53,7 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	
 		for (let r = row1; r <= row2; r++) {
 			for (let c = col1; c <= col2; c++) {
-				if (map.walls[r] && map.walls[r][c] === 1) return true;
+				if (map.walls[r] && map.walls[r][c] == true) return true;
 			}
 		}
 		return false;
@@ -133,24 +153,27 @@ document.addEventListener('DOMContentLoaded', () => {
 	}
 	
 	class NormalBullet extends Bullet {
-		constructor() {
+		constructor(x, y, angle) {
 			super(x, y, angle)
 		}
 		
 		update(delta) {
 		if (!this.alive) return;
-			
+			this.dtx = this.x*delta
+			this.dty = this.y*delta
+
 			// Horizontal Movement & Wall Bounce
-			if (isWall(this.x + dtx, this.y, 3)) {
+			if (isWall(this.x + this.dtx, this.y, 3)) {
 				this.vx *= -1;
-				
+				this.dtx *= -1;
 				this.bounces--;
 				}
 			this.x += this.vx;
 	
 			// Vertical Movement & Wall Bounce
-			if (isWall(this.x, this.y + dty, 3)) {
+			if (isWall(this.x, this.y + this.dty, 3)) {
 				this.vy *= -1;
+				this.dty *= -1;
 				this.bounces--;
 			}
 			this.y += this.vy;
@@ -183,13 +206,13 @@ document.addEventListener('DOMContentLoaded', () => {
 		const WALL_THICK = 2;
 		for (let r = 0; r < map.walls.length; r++) {
 			for (let c = 0; c < map.walls[r].length; c++) {
-				if (map.walls[r][c] === 0) {continue;}
+				if (map.walls[r][c] == false) {continue;}
 				if (r%2 == 0){ //Horozontal lines
 					ctx.fillStyle = WALL_STYLE;
 					ctx.fillRect(c * TILE_SIZE, Math.floor(r/2) * TILE_SIZE, TILE_SIZE, WALL_THICK/2);
 				}else{ //Vertical lines
 					ctx.fillStyle = WALL_STYLE;
-					ctx.fillRect(c * TILE_SIZE, Math.floor(r/2) * TILE_SIZE-TILE_SIZE, WALL_THICK/2, TILE_SIZE);
+					ctx.fillRect(c * TILE_SIZE, Math.floor(r/2) * TILE_SIZE, WALL_THICK/2, TILE_SIZE);
 				}
 			}
 		}
