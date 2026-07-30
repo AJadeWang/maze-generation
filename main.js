@@ -1,5 +1,67 @@
-document.addEventListener('DOMContentLoaded', () => {
+// == Classes == \\
+class Vector2{
+	constructor(x=0, y=0){
+		this.x = x;
+		this.y = y;
+	}
+	add(b){return new Vector2( this.x + b.x, this.y + b.y);}
+	
+}
 
+class Bullet {
+	constructor(x, y, angle, speed=5, bounce=6) {
+		this.x = x;
+		this.y = y;
+		this.vx = Math.cos(angle) * speed;
+		this.vy = Math.sin(angle) * speed;
+		this.dtx = this.vx;
+		this.dty = this.vy;
+		this.bounces = bounce;
+		this.alive = true;
+			if (this.update === undefined) {throw new Error('Missing update() method');}
+
+		if (this.draw === undefined) {throw new Error('Missing draw() method');}
+
+	}
+}
+
+class NormalBullet extends Bullet {
+	constructor(x, y, angle) {
+		super(x, y, angle)
+	}
+	
+	update(delta) {
+	if (!this.alive) return;
+		this.dtx = this.x*delta
+		this.dty = this.y*delta
+			// Horizontal Movement & Wall Bounce
+		if (isWall(this.x + this.dtx, this.y, 3)) {
+			this.vx *= -1;
+			this.dtx *= -1;
+			this.bounces--;
+			}
+		this.x += this.vx;
+
+		// Vertical Movement & Wall Bounce
+		if (isWall(this.x, this.y + this.dty, 3)) {
+			this.vy *= -1;
+			this.dty *= -1;
+			this.bounces--;
+		}
+		this.y += this.vy;
+
+		if (this.bounces < 0) this.alive = false;
+	}
+	draw() {
+		ctx.fillStyle = '#FF5722';
+		ctx.beginPath();
+		ctx.arc(this.x, this.y, 4, 0, Math.PI * 2);
+		ctx.fill();
+	}
+}
+
+// == main game script == \\
+document.addEventListener('DOMContentLoaded', () => {
 	const canvas = document.getElementById('gameCanvas');
 	const ctx = canvas.getContext('2d');
 	
@@ -32,22 +94,66 @@ document.addEventListener('DOMContentLoaded', () => {
 	window.addEventListener('keyup', e => keys[e.code] = false);
 	
 	// --- Game World & Map Data ---
-	// Simple 0/1 Grid Maze (1 = Wall, 0 = Empty)
+	// Simple true/false Grid Maze (true = filled, false = Empty)
 	const TILE_SIZE = 50;
 	const ROW = 10 *2+1;
 	const COLUMN = 15;
+
 	const map = {
+		gen_type:1, // 1:Recursive, 2:Eulers
 		tiles:Array.from({length:ROW}, () => Array({length:COLUMN}).fill(true)),
 		walls:[],
-		
-		//cordinate manipulation functions
-		tile2wall(x1,y1,x2,y2) {
+		DIR: { // x and y values on grid
+			UP: new Vector2(0, -1), 
+			DOWN: new Vector2(0, 1), 
+			LEFT: new Vector2(-1, 0), 
+			RIGHT: new Vector2(1, 0),
 		},
-		breakWall(x, y, direction) {
+		T2WALL: {
+			UP: new Vector2(0,0), 
+			DOWN: new Vector2(0,1), 
+			LEFT: new Vector2(0,0), 
+			RIGHT: new Vector2(1,0), 
+		},
+		
+		//map building functions
+		_breakWall(location, dir) {
+			let wall_address = location + this.T2WALL[dir];
+			if (wall_address.X < 0 || wall_address.x > ROW+1 
+					|| wall_address.y < 0 || wall_address.y > COLUMN+1 ) {
+				return false;
+			}
+			this.walls[wall_address.X][wall_address.y] = false;
+			return true;
+		},
+		_recursive(){
+		},
+		_mapBuilders: [
+			(start, end) => this._recursive(start, end),
+			(start, end) => this._eulers(start, end),
+		],
+
+		//cordinate manipulation functions
+		getWall(x,y,vx, vy, radius=0) {
 			
 		},
+		isWall(x, y, radius=0) {
+			// Check collision between a point/circle and wall tiles
+			const col1 = Math.floor((x - radius) / TILE_SIZE);
+			const col2 = Math.floor((x + radius) / TILE_SIZE);
+			const row1 = Math.floor((y - radius) / TILE_SIZE);
+			const row2 = Math.floor((y + radius) / TILE_SIZE);
+	
+			for (let r = row1; r <= row2; r++) {
+				for (let c = col1; c <= col2; c++) {
+					if (map.walls[r] && map.walls[r][c] == true) return true;
+				}
+			}
+			return false;
+		},
 		
-		init() {
+		buildMap() {
+			//clean map
 			for (let r=0; r < ROW; r++) {
 				const row = [];
 				for (let c=0; c < COLUMN+r%2; c++) {
@@ -55,29 +161,12 @@ document.addEventListener('DOMContentLoaded', () => {
 				}
 				this.walls.push(row);
 			}
+			
+			//generate
+			
 		}
 	};
-	map.init();
-	console.log("map data");
-	console.log(map.walls.length);
-	console.log(map.walls[0].length);
-	console.log(map.walls.length);
-	console.log(map.walls[0].length);
-	
-	// Check collision between a point/circle and wall tiles
-	function isWall(x, y, radius = 0) {
-		const col1 = Math.floor((x - radius) / TILE_SIZE);
-		const col2 = Math.floor((x + radius) / TILE_SIZE);
-		const row1 = Math.floor((y - radius) / TILE_SIZE);
-		const row2 = Math.floor((y + radius) / TILE_SIZE);
-	
-		for (let r = row1; r <= row2; r++) {
-			for (let c = col1; c <= col2; c++) {
-				if (map.walls[r] && map.walls[r][c] == true) return true;
-			}
-		}
-		return false;
-	}
+	map.buildMap();
 	
 	// --- Tank Entity ---
 	const tank = {
@@ -136,58 +225,6 @@ document.addEventListener('DOMContentLoaded', () => {
 	
 	// --- Bouncing Bullet Entity ---
 	const bullets = [];
-	class Bullet {
-		constructor(x, y, angle, speed=5, bounce=6) {
-			this.x = x;
-			this.y = y;
-			this.vx = Math.cos(angle) * speed;
-			this.vy = Math.sin(angle) * speed;
-			this.dtx = this.vx;
-			this.dty = this.vy;
-			this.bounces = bounce;
-			this.alive = true;
-
-			if (this.update === undefined) {throw new Error('Missing update() method');}
-			if (this.draw === undefined) {throw new Error('Missing draw() method');}
-		}
-	}
-	
-	class NormalBullet extends Bullet {
-		constructor(x, y, angle) {
-			super(x, y, angle)
-		}
-		
-		update(delta) {
-		if (!this.alive) return;
-			this.dtx = this.x*delta
-			this.dty = this.y*delta
-
-			// Horizontal Movement & Wall Bounce
-			if (isWall(this.x + this.dtx, this.y, 3)) {
-				this.vx *= -1;
-				this.dtx *= -1;
-				this.bounces--;
-				}
-			this.x += this.vx;
-	
-			// Vertical Movement & Wall Bounce
-			if (isWall(this.x, this.y + this.dty, 3)) {
-				this.vy *= -1;
-				this.dty *= -1;
-				this.bounces--;
-			}
-			this.y += this.vy;
-	
-			if (this.bounces < 0) this.alive = false;
-		}
-
-		draw() {
-			ctx.fillStyle = '#FF5722';
-			ctx.beginPath();
-			ctx.arc(this.x, this.y, 4, 0, Math.PI * 2);
-			ctx.fill();
-		}
-	}
 	
 	// --- Main Game Loop ---
 	let lastTime = 0;
