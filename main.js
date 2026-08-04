@@ -4,7 +4,7 @@ class Vector2{
 		this.x = x;
 		this.y = y;
 	}
-	isVector2(){
+	isVector2(v){
 		if (!v){console.warn("failed Vector2 check");return this;}
 	}
 	add(v){
@@ -298,7 +298,9 @@ document.addEventListener('DOMContentLoaded', () => {
 		const delta = (currentTime - lastTime) /1000;
 		lastTime = currentTime;
 		const cappedDelta = Math.min(delta, 0.05);
-	
+		//Draw map
+		map.drawMap();
+		
 		//Update & Draw Entities
 		tank.update(cappedDelta);
 		tank.draw();
