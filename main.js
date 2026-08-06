@@ -6,6 +6,9 @@ const bullets = [];
 const ROW = 10; 		// total rows in maze
 const COLUMN = 15;		// total columns in maze
 const MAX_BULLETS = 3;		// total active bullets cap for normal bullets
+const TILE_SIZE = 50;		// size of the maze grid in pixles
+
+const DEBUG = false;
 
 // == Classes == \\
 class Vector2{
@@ -20,10 +23,17 @@ class Vector2{
 	add(v){
 		return new Vector2(this.x + v.x, this.y + v.y);
 	}
-	tileToWall(d){
-		return new Vector2(this.x + d.x, this.y*2 + d.y);
+	tileToWall(dir_name){
+		let dir_vector2 = T2WALL[dir_name];
+		return new Vector2(this.x + dir_vector2.x, 1+ this.y*2 + dir_vector2.y);
 	}
 }
+const T2WALL = {
+	UP: new Vector2(0,-1), 
+	DOWN: new Vector2(0,1), 
+	LEFT: new Vector2(0,0), 
+	RIGHT: new Vector2(1,0), 
+};
 
 
 // Bullet classes
@@ -83,9 +93,8 @@ class NormalBullet extends Bullet {
 
 // Simple true/false Grid Maze (true = filled, false = Empty)
 class MapGenerator {
-	TILE_SIZE = 50;
 	#ctx = document.getElementById('gameCanvas').getContext('2d');
-	#WALL_STYLE = '#3a3a4a';
+	#WALL_STYLE = 'black';
 	#WALL_THICK = 2;
 	gen_type = 0; // 0:Recursive, 1:Eulers
 	#tiles = Array.from({length:ROW}, () => Array(COLUMN).fill(true));
@@ -96,12 +105,6 @@ class MapGenerator {
 		DOWN: new Vector2(0, 1), 
 		LEFT: new Vector2(-1, 0), 
 		RIGHT: new Vector2(1, 0),
-	};
-	T2WALL = {
-		UP: new Vector2(0,0), 
-		DOWN: new Vector2(0,1), 
-		LEFT: new Vector2(0,0), 
-		RIGHT: new Vector2(1,0), 
 	};
 	constructor(){
 		this.rebuild();
@@ -124,21 +127,24 @@ class MapGenerator {
 			this.#walls[location.y][location.x] = value
 		}
 	}
-	#breakWall(location, dir_name) {
-		let wall_address = location.tileToWall(this.T2WALL[dir_name]);
+	#breakWall(current_pos, dir_name) {
+		if (DEBUG){console.log(current_pos, dir_name)}
+		
+		//getting target wall and validating ability to break
+		let wall_address = current_pos.tileToWall(dir_name);
 		if (!(wall_address instanceof Vector2 || wall_address == null)){return false}
 		if (!wall_address.isValid()){return false}
+		//needs to shift cordinates to horrizontal walls according to array format
 		if (wall_address.y < 0 || wall_address.y > this.#walls.length){return false}
-		if (wall_address.x < 0 || wall_address.x > this.#walls[wall_address.y].length) {
-			console.log( wall_address.x , this.#walls[wall_address.y].length);
-			return false;
-		}
+		//needs to shift cordinates to verticle walls according to array format
+		if (wall_address.x < wall_address.y%2 || wall_address.x > this.#walls[wall_address.y].length) {return false}
+		
 		this.#setWall(wall_address, false);
 		return true;
 	}
 
 	//maze generation algorythms
-	#recursive(location) {
+	#recursive(current_pos) {
 		//get genearetd randomly generated digging directions
 		const direction = [...this.DIRECTION_NAMES];
 		direction.sort(() => Math.random() - 0.5);
@@ -147,10 +153,8 @@ class MapGenerator {
 		this.#setTile(0,0,false);
 		for (const dir_name of direction) {
 			//target tile for tunneling
-			let targ_pos = location.add(this.DIR[dir_name]);
+			let targ_pos = current_pos.add(this.DIR[dir_name]);
 			
-			//console.log(targ_pos,targ_pos.y == null,targ_pos.y < 0,targ_pos.y > this.walls.length 
-			//		,targ_pos.x == null,targ_pos.x < 0, targ_pos.x > this.walls[0].length);
 			//clamping restrictions of target tile to break the walls to
 			if (!targ_pos.isValid()){continue}
 			if (targ_pos.y < 0 || targ_pos.y >= this.#tiles.length
@@ -161,7 +165,7 @@ class MapGenerator {
 			//digging
 			this.#setTile(targ_pos, false);
 
-			let success = this.#breakWall(location, dir_name);
+			let success = this.#breakWall(current_pos, dir_name);
 			if (!success) {continue}
 			this.#recursive(targ_pos);
 		}
@@ -182,10 +186,10 @@ class MapGenerator {
 	//wall collision check
 	isWall(x, y, radius=0) {
 		// Check collision between a point/circle and wall tiles
-		const col1 = Math.floor((x - radius) / this.TILE_SIZE);
-		const col2 = Math.floor((x + radius) / this.TILE_SIZE);
-		const row1 = Math.floor((y - radius) / this.TILE_SIZE);
-		const row2 = Math.floor((y + radius) / this.TILE_SIZE);
+		const col1 = Math.floor((x - radius) / TILE_SIZE);
+		const col2 = Math.floor((x + radius) / TILE_SIZE);
+		const row1 = Math.floor((y - radius) / TILE_SIZE);
+		const row2 = Math.floor((y + radius) / TILE_SIZE);
 
 		for (let r = row1; r <= row2; r++) {
 			for (let c = col1; c <= col2; c++) {
@@ -210,6 +214,7 @@ class MapGenerator {
 		//generate
 		this.#mapBuilders[this.gen_type% this.#mapBuilders.length](start)
 		console.log("Compelted maze build");
+		if (!DEBUG) {return}
 		console.log(this.#tiles);
 		console.log(this.#walls);
 	}
@@ -221,14 +226,24 @@ class MapGenerator {
 				if (this.#walls[r][c] == false) {continue;}
 				if (r%2 == 0){ //Horozontal lines
 					this.#ctx.fillStyle = this.#WALL_STYLE;
-					this.#ctx.fillRect(c * this.TILE_SIZE, Math.floor(r/2) * this.TILE_SIZE, this.TILE_SIZE, this.#WALL_THICK/2);
+					this.#ctx.fillRect(c * TILE_SIZE, Math.floor(r/2) * TILE_SIZE, TILE_SIZE, this.#WALL_THICK/2);
 				}else{ //Vertical lines
 					this.#ctx.fillStyle = this.#WALL_STYLE;
-					this.#ctx.fillRect(c * this.TILE_SIZE, Math.floor(r/2) * this.TILE_SIZE, this.#WALL_THICK/2, this.TILE_SIZE);
+					this.#ctx.fillRect(c * TILE_SIZE, Math.floor(r/2) * TILE_SIZE, this.#WALL_THICK/2, TILE_SIZE);
 				}
 			}
 		}
-			
+		
+		//printing out cordinates on the table when dubugging
+		if (!DEBUG){return}
+		this.#ctx.font = '12px';
+		this.#ctx.textAlign = 'center';
+		this.#ctx.textBaseline = 'middle';
+		for (let r=0; r<this.#tiles.length; r++){
+			for (let c=0; c<this.#tiles[r].length; c++){
+				this.#ctx.fillText(`(${c}, ${r})`, c*TILE_SIZE+TILE_SIZE/2, r*TILE_SIZE+TILE_SIZE/2);
+			}
+		}	
 	}
 }
 
@@ -244,8 +259,8 @@ class Tank{
 	#canShoot = true;
 	constructor(map, x, y){
 		this.map = map;
-		this.x = x ?? map.TILE_SIZE;
-		this.y = y ?? map.TILE_SIZE;
+		this.x = x ?? TILE_SIZE/2;
+		this.y = y ?? TILE_SIZE/2;
 	}
 	
 	//controls
@@ -312,7 +327,7 @@ class Tank{
 		this.#ctx.fillRect(-12, -10, 24, 20);
 	
 		// Cannon barrel
-		this.#ctx.fillStyle = '#fff';
+		this.#ctx.fillStyle = 'black';
 		this.#ctx.fillRect(0, -3, 16, 6);
 	
 		this.#ctx.restore();
