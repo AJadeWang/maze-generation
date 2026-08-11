@@ -6,9 +6,32 @@ const bullets = [];
 const ROW = 10; 		// total rows in maze
 const COLUMN = 15;		// total columns in maze
 const MAX_BULLETS = 3;		// total active bullets cap for normal bullets
-const TILE_SIZE = 50;		// size of the maze grid in pixles
+const TANK_LENGTH = 24;	// size of the tank length
+const TANK_WIDTH = 20;		// size of the tank width
 
 const DEBUG = false;
+const NORM_TILE_SIZE = 80;
+function fitCanvasToScreen(canvas, maxWidth, maxHeight) {
+	const mazeWidth = COLUMN * NORM_TILE_SIZE;
+	const mazeHeight = ROW * NORM_TILE_SIZE;
+
+	// Calculate scale to fit screen
+	const scaleX = maxWidth / mazeWidth;
+	const scaleY = maxHeight / mazeHeight;
+	const scale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 1x
+
+	const finalSize = NORM_TILE_SIZE * scale;
+	const width = COLUMN * finalSize;
+	const height = ROW * finalSize;
+	
+	canvas.width = width+5;
+	canvas.height = height+5;
+	canvas.style.width = width + 'px';
+	canvas.style.height = height + 'px';
+   
+	return finalSize; // Return actual tile size used
+}
+const TILE_SIZE = fitCanvasToScreen(document.getElementById('gameCanvas'), window.innerWidth - 40, window.innerHeight - 40);		// size of the maze grid in pixles
 
 // == Classes == \\
 class Vector2{
@@ -16,16 +39,35 @@ class Vector2{
 		this.x = x;
 		this.y = y;
 	}
-	isValid(){
-		if (this.x==null || this.y==null){console.warn("failed Vector2 check");return false;}
-		return true;
+	add(v){return new Vector2(this.x + v.x, this.y + v.y)}
+	subtract(v){return new Vector2(this.x - v.x, this.y - v.y)}
+	scale(s){return new Vector2(this.x * s, this.y * s)}
+	rotate(angle){
+		const cos = Math.cos(angle);
+		const sin = Math.sin(angle);
+		return new Vector2(
+			this.x * cos - this.y * sin,
+			this.x * sin + this.y * cos
+		);
 	}
-	add(v){
-		return new Vector2(this.x + v.x, this.y + v.y);
+	length(){
+		return Math.hypot(this.x, this.y);
 	}
+	normalize(){
+		const len = this.length();
+		return len === 0 ? new Vector2() : new Vector2(this.x /  len, this.y / len); 
+	}
+	addNums(x, y){
+		this.x += x;
+		this.y += y;
+	}
+	isValid(){return !isNaN(this.x) && !isNaN(this.y)}
 	tileToWall(dir_name){
 		let dir_vector2 = T2WALL[dir_name];
-		return new Vector2(this.x + dir_vector2.x, 1+ this.y*2 + dir_vector2.y);
+		return new Vector2(
+			this.x + dir_vector2.x,
+			this.y * 2 + 1  + dir_vector2.y
+		);
 	}
 }
 const T2WALL = {
@@ -62,8 +104,8 @@ class NormalBullet extends Bullet {
 	
 	update(delta) {
 	if (!this.alive) return;
-		this.dtx = this.x*delta
-		this.dty = this.y*delta
+		this.dtx = this.vx*delta
+		this.dty = this.vy*delta
 		// Horizontal Movement & Wall Bounce
 		if (isWall(this.x + this.dtx, this.y, 3)) {
 			this.vx *= -1;
@@ -109,7 +151,7 @@ class MapGenerator {
 	constructor(){
 		this.rebuild();
 	}
-	
+ 
 	//map building functions
 	#getTile(location){
 		if (location instanceof Vector2){return this.#tiles[location.y][location.x]}
@@ -118,8 +160,15 @@ class MapGenerator {
 		if (value1 instanceof Vector2){this.#tiles[value1.y][value1.x] = value2}
 		else if (typeof value1 === "number"){this.#tiles[value1][value2] = value3}
 	}
-	#getWall(location){
-		if (location instanceof Vector2){return this.#tiles[location.y][location.x]}
+	#getWall(row, col){
+		const hRow = row*2;
+		const vRow = col*2+1;
+		return {
+			UP: this.#walls[hRow]?.[col] || false,
+			DOWN: this.#walls[hRow]?.[col + 1] || false,
+			LEFT: this.#walls[vRow]?.[col] || false,
+			RIGHT: this.#walls[vRow]?.[col + 1] || false
+		};
 	}
 	#setWall(location, value){
 		if (location instanceof Vector2){
@@ -159,8 +208,7 @@ class MapGenerator {
 			if (!targ_pos.isValid()){continue}
 			if (targ_pos.y < 0 || targ_pos.y >= this.#tiles.length
 					|| targ_pos.x < 0 || targ_pos.x >= this.#tiles[targ_pos.y].length) {continue}
-			if (this.#tiles[targ_pos.y] == null || this.#getTile(targ_pos)==null){continue}
-			if (!this.#getTile(targ_pos)){continue}
+			if (!this.#tiles[targ_pos.y]?.[targ_pos.x]){continue}
 			
 			//digging
 			this.#setTile(targ_pos, false);
@@ -178,27 +226,49 @@ class MapGenerator {
 		(start) => this.#eulers(start),
 	];
 
-	//cordinate manipulation functions
-	getWall(x,y,vx, vy, radius=0) {
-		
-	}
-
 	//wall collision check
-	isWall(x, y, radius=0) {
-		// Check collision between a point/circle and wall tiles
-		const col1 = Math.floor((x - radius) / TILE_SIZE);
-		const col2 = Math.floor((x + radius) / TILE_SIZE);
-		const row1 = Math.floor((y - radius) / TILE_SIZE);
-		const row2 = Math.floor((y + radius) / TILE_SIZE);
+	checkWallCollision(pos, angle) {
+		const hw = TANK_WIDTH / 2;
+		const hl = TANK_LENGTH / 2;
+	
+		const corners = [
+			new Vector2(-hl, -hw),
+			new Vector2(hl, -hw),
+			new Vector2(hl, hw),
+			new Vector2(-hl, hw)
+		];
+		   
+		for (const corner of corners) {
+			const rotated = corner.rotate(angle);
+			const worldPos = pos.add(rotated);
+	
+			const col = Math.floor(worldPos.x / TILE_SIZE);
+			const row = Math.floor(worldPos.y / TILE_SIZE);
+		
+			// Check horizontal walls (even rows)
+			const hRow = row * 2;
+			if (this.#walls[hRow]?.[col] === true) {
+				const wallY = row * TILE_SIZE;
+				if (worldPos.y < wallY + this.WALL_THICK / 2) return true
+			}
+			if (this.#walls[hRow]?.[col + 1] === true) {
+				const wallY = (row + 1) * TILE_SIZE;
+				if (worldPos.y > wallY - this.WALL_THICK / 2) return true
+			}
 
-		for (let r = row1; r <= row2; r++) {
-			for (let c = col1; c <= col2; c++) {
-				if (this.#walls[r] && this.#walls[r][c] == true) {return true;}
+			// Check vertical walls (odd rows)
+			const vRow = row * 2 + 1;
+			if (this.#walls[vRow]?.[col] === true) {
+				const wallX = col * TILE_SIZE;
+				if (worldPos.x < wallX + this.WALL_THICK / 2) return true
+			}
+			if (this.#walls[vRow]?.[col + 1] === true) {
+				const wallX = (col + 1) * TILE_SIZE;
+				if (worldPos.x > wallX - this.WALL_THICK / 2) return true
 			}
 		}
 		return false;
 	}
-	
 	//used to call to regenerate new map
 	rebuild(start = new Vector2(0,0)) {
 		//clean map
@@ -214,6 +284,7 @@ class MapGenerator {
 		//generate
 		this.#mapBuilders[this.gen_type% this.#mapBuilders.length](start)
 		console.log("Compelted maze build");
+		
 		if (!DEBUG) {return}
 		console.log(this.#tiles);
 		console.log(this.#walls);
@@ -253,18 +324,21 @@ class Tank{
 	#ctx = document.getElementById('gameCanvas').getContext('2d');
 	#angle = 0;
 	#speed = 0;
-	#maxSpeed = 2.5;
-	#rotSpeed = 0.08;
+	#maxSpeed = 200;
+	#rotSpeed = 6.5;
 	#radius = 12;
 	#canShoot = true;
 	constructor(map, x, y){
 		this.map = map;
-		this.x = x ?? TILE_SIZE/2;
-		this.y = y ?? TILE_SIZE/2;
+		this.pos = new Vector2(x ?? TILE_SIZE/2, y ?? TILE_SIZE/2);
+		
+		// --- Keybindings Management --- \\
+		window.addEventListener('keydown', e => this.#keys[e.code] = true);
+		window.addEventListener('keyup', e => this.#keys[e.code] = false);
 	}
 	
 	//controls
-	keys = {};
+	#keys = {};
 	#bindings = {
 		up: 'KeyW',
 		down: 'KeyS',
@@ -277,58 +351,88 @@ class Tank{
 		document.getElementById(`lbl-${action}`).textContent = code === 'Space' ? 'Space' : code.replace('Key', '');
 	}
 	
-	rebind(action) {
+	rebind(action, event) {
 		const btn = event.target;
 		btn.textContent = "Press any key...";
 		const handler = (e) => {
-			bindings[action] = e.code;
-			updateLabel(action, e.code);
+			this.#bindings[action] = e.code;
+			this.updateLabel(action, e.code);
 			window.removeEventListener('keydown', handler);
 		};
 		window.addEventListener('keydown', handler, { once: true });
 	}
-		
 
 	//image update
-	update() {
-		if (this.keys[this.#bindings.left]) this.#angle -= this.#rotSpeed;
-	        	if (this.keys[this.#bindings.right]) this.#angle += this.#rotSpeed;
-		
-			if (this.keys[this.#bindings.up]) this.#speed = this.#maxSpeed;
-	        		else if (this.keys[this.#bindings.down]) this.#speed = -this.#maxSpeed * 0.6;
-			else this.#speed = 0;
-	
-			// Calculate potential position
-			const nextX = this.x + Math.cos(this.#angle) * this.#speed;
-			const nextY = this.y + Math.sin(this.#angle) * this.#speed;
-		
-			// Apply movement with basic wall collision blocking
-			if (!this.map.isWall(nextX, this.y, this.#radius)) this.x = nextX;
-			if (!this.map.isWall(this.x, nextY, this.#radius)) this.y = nextY;
-	
-			// Shooting logic
-			if (this.keys[this.#bindings.shoot] && this.#canShoot) {
-				bullets.push(new NormalBullet(
-				this.x + Math.cos(this.#angle) * 18,
-				this.y + Math.sin(this.#angle) * 18,
-				this.#angle));
-				this.#canShoot = false;
+	#moveWithSubSteps(targetPos, angle) {
+		const subSteps = Math.max(Math.ceil(
+		Math.hypot(targetPos.x - this.pos.x, targetPos.y - this.pos.y) / (this.map.WALL_THICKNESS * 0.5)), 4);
+	    
+		const stepX = (targetPos.x - this.pos.x) / subSteps;
+		const stepY = (targetPos.y - this.pos.y) / subSteps;
+	    
+		for (let i = 1; i <= subSteps; i++) {
+			const testPos = new Vector2(
+				this.pos.x + stepX * i,
+				this.pos.y + stepY * i
+			);
+			if (this.map.checkWallCollision(testPos, angle, this.width, this.height)) {
+				return false; // Blocked - don't move
+			}
 		}
-		if (!this.keys[this.#bindings.shoot]) this.#canShoot = true;
+	    
+		// All clear - apply full movement
+		this.pos.x = targetPos.x;
+		this.pos.y = targetPos.y;
+		return true;
+	}
+	update(delta) {
+		// User input management
+		if (this.#keys[this.#bindings.left]) this.#angle -= this.#rotSpeed * delta;
+		if (this.#keys[this.#bindings.right]) this.#angle += this.#rotSpeed * delta;
+	 
+		// Speed management
+		if (this.#keys[this.#bindings.up]) this.#speed = this.#maxSpeed;
+		else if (this.#keys[this.#bindings.down]) this.#speed = -this.#maxSpeed * 0.6;
+		else this.#speed = 0;
+		 
+		// Calculate movement
+		const moveX = Math.cos(this.#angle) * this.#speed * delta;
+		const moveY = Math.sin(this.#angle) * this.#speed * delta;
+		 
+		// Try X movement with sub-steps
+		const xOnly = new Vector2(this.pos.x + moveX, this.pos.y);
+		if (this.#moveWithSubSteps(xOnly, this.#angle)) {
+			this.pos.x = xOnly.x;
+		}
+	 
+		// Try Y movement with sub-steps
+		const yOnly = new Vector2(this.pos.x, this.pos.y + moveY);
+		if (this.#moveWithSubSteps(yOnly, this.#angle)) {
+			this.pos.y = yOnly.y;
+		}
+	 
+		// Shooting logic
+		if (this.#keys[this.#bindings.shoot] && this.#canShoot) {
+			const bulletX = this.pos.x + Math.cos(this.#angle) * 18;
+			const bulletY = this.pos.y + Math.sin(this.#angle) * 18;
+			bullets.push(new NormalBullet(bulletX, bulletY, this.#angle));
+			this.#canShoot = false;
+		}
+		if (!this.#keys[this.#bindings.shoot]) this.#canShoot = true;
 	}
 	
 	draw() {
 		this.#ctx.save();
-		this.#ctx.translate(this.x, this.y);
-		this.#ctx.rotate(this.angle);
+		this.#ctx.translate(this.pos.x, this.pos.y);
+		this.#ctx.rotate(this.#angle);
 	
 		// Body
  		this.#ctx.fillStyle = '#4CAF50';
-		this.#ctx.fillRect(-12, -10, 24, 20);
+		this.#ctx.fillRect(-TANK_LENGTH/2, -TANK_WIDTH/2, TANK_LENGTH, TANK_WIDTH);
 	
 		// Cannon barrel
 		this.#ctx.fillStyle = 'black';
-		this.#ctx.fillRect(0, -3, 16, 6);
+		this.#ctx.fillRect(0, -TANK_WIDTH*0.15, TANK_LENGTH*0.66, TANK_WIDTH*0.3);
 	
 		this.#ctx.restore();
 	}
@@ -343,10 +447,6 @@ document.addEventListener('DOMContentLoaded', () => {
 	
 	// --- Tank Entity --- \\
 	const tank = new Tank(map);
-
-	// --- Keybindings Management --- \\
-	window.addEventListener('keydown', e => tank.keys[e.code] = true);
-	window.addEventListener('keyup', e => tank.keys[e.code] = false);
 	
 	// --- Main Game Loop --- \\
 	let lastTime = 0;
@@ -362,6 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		const delta = (currentTime - lastTime) /1000;
 		lastTime = currentTime;
 		const cappedDelta = Math.min(delta, 0.05);
+		
 		//Draw map
 		map.drawMap();
 		
